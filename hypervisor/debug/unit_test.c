@@ -8,6 +8,13 @@
 #include <multiboot.h>
 #include <boot_context.h>
 
+#define	GDT_ADDRESS	(2 * 1024 * 1024)
+static const uint64_t unit_test_init_gdt[] = {
+        0x0UL,
+        0x00CF9B000000FFFFUL,   /* Linear Code */
+        0x00CF93000000FFFFUL,   /* Linear Data */
+};
+
 static struct vm_io_range testdev_range = {
 	.flags = IO_ATTR_RW,
 	.base = 0xf4U,
@@ -80,11 +87,11 @@ int32_t unit_test_sw_loader(struct acrn_vm *vm)
 	uint32_t kernel_entry_offset = 0U;
 	struct sw_kernel_info *sw_kernel = &(vm->sw.kernel_info);
 	struct acrn_vcpu *vcpu = vcpu_from_vid(vm, BOOT_CPU_ID);
-
+	struct acrn_vcpu_regs unit_test_context;
 	pr_dbg("Loading guest to run-time location");
 
 	prepare_bsp_gdt(vm);
-	set_vcpu_regs(vcpu, &boot_context);
+	memset(&unit_test_context, 0, sizeof(unit_test_context));
 
 	/* Hack: unit tests are always loaded at 4M, not 16M. */
 	sw_kernel->kernel_load_addr = (void *)(4U * MEM_1M);
@@ -103,6 +110,7 @@ int32_t unit_test_sw_loader(struct acrn_vm *vm)
 			break;
 		}
 	}
+	
 	if (kernel_entry_offset == 0U) {
 		panic("Unrecognized image format: no multiboot header detected.");
 	}
@@ -112,14 +120,41 @@ int32_t unit_test_sw_loader(struct acrn_vm *vm)
 			+ kernel_entry_offset);
 	if (is_vcpu_bsp(vcpu)) {
 		/* Set VCPU entry point to kernel entry */
-		vcpu_set_rip(vcpu, (uint64_t)sw_kernel->kernel_entry_addr);
+		unit_test_context.rip = (uint64_t)sw_kernel->kernel_entry_addr;
 		pr_info("%s, VM %hu VCPU %hu Entry: 0x%016llx ",
 			__func__, vm->vm_id, vcpu->vcpu_id,
 			sw_kernel->kernel_entry_addr);
 	}
-
 	(void)copy_to_gpa(vm, sw_kernel->kernel_src_addr,
 		(uint64_t)sw_kernel->kernel_load_addr, sw_kernel->kernel_size);
+
+pr_fatal("unit test entry...1.%lld",kernel_entry_offset);		
+pr_fatal("unit test entry...2.");		
+		
+		
+	unit_test_context.gdt.limit = sizeof(unit_test_init_gdt) - 1;
+	unit_test_context.gdt.base = GDT_ADDRESS;
+
+	(void)copy_to_gpa(vm, (void *)unit_test_init_gdt,
+		(uint64_t)GDT_ADDRESS, sizeof(unit_test_init_gdt));
+
+	/* CR0_ET | CR0_NE | CR0_PE */
+	unit_test_context.cr0 = 0x31U;
+
+	unit_test_context.cs_ar = 0xCF9BU;
+	unit_test_context.cs_sel = 0x8U;
+	unit_test_context.cs_limit = 0xFFFFFFFFU;
+
+	unit_test_context.ds_sel = 0x10U;
+	unit_test_context.ss_sel = 0x10U;
+	unit_test_context.es_sel = 0x10U;
+	unit_test_context.gs_sel = 0x10U;
+	unit_test_context.fs_sel = 0x10U;
+
+	set_vcpu_regs(vcpu, &unit_test_context);
+	
+pr_fatal("unit test entry...3.");		
+		
 
 	/* Documentation states:
 	 *     eax = MULTIBOOT_INFO_MAGIC
@@ -133,6 +168,8 @@ int32_t unit_test_sw_loader(struct acrn_vm *vm)
 
 	register_pio_emulation_handler(vm, TESTDEV_PIO_IDX, &testdev_range, testdev_io_read, testdev_io_write);
 
+pr_fatal("unit test entry....4");		
+		
 	return ret;
 }
 
